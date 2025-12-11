@@ -3,50 +3,44 @@ from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Initialize FastAPI
 app = FastAPI()
 
-# Get Token
+# Initialize Bot Token
 TOKEN = os.environ.get("TOKEN")
 
-# 1. Define the handler function (Must be async now!)
+# --- Define your Bot Logic here ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id, 
-        text="I'm a bot, please talk to me!"
+        text="I am alive and running on Vercel (v20)!"
     )
 
-# 2. Build the Application (Replaces Dispatcher)
-# We build it globally so we don't rebuild it on every request if Vercel keeps the instance warm
-if TOKEN:
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Register handlers
-    start_handler = CommandHandler('start', start)
-    application.add_handler(start_handler)
-
+# --- Webhook Handler ---
 @app.post("/webhook")
 async def webhook(request: Request):
-    """
-    Handle Telegram Webhook
-    """
     if not TOKEN:
-        return {"error": "Token not found"}
+        return {"error": "TOKEN environment variable is missing"}
 
-    # 1. Load the JSON data
+    # 1. Decode the update from Telegram
     data = await request.json()
+    
+    # 2. Build the Application (Serverless-safe mode)
+    # We build a fresh app instance per request to avoid "frozen" state issues
+    application = ApplicationBuilder().token(TOKEN).build()
 
-    # 2. Decode the update
-    # In v20, we don't need the bot instance here, just the data
-    update = Update.de_json(data, application.bot)
+    # 3. Register your handlers
+    application.add_handler(CommandHandler('start', start))
 
-    # 3. Process the update
-    # 'await' ensures the bot waits for the message to be sent before finishing
-    await application.initialize()
-    await application.process_update(update)
+    # 4. Process the update
+    # The 'await' here is the magic that fixes the "Silent Bot" issue.
+    # It forces Vercel to keep the server running until the bot replies.
+    async with application:
+        await application.process_update(
+            Update.de_json(data, application.bot)
+        )
 
     return {"message": "ok"}
 
 @app.get("/")
 def index():
-    return {"message": "Bot is running!"}
+    return {"message": "Bot is running"}
