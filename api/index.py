@@ -7,7 +7,7 @@ from telegram.ext import Dispatcher, CommandHandler
 app = FastAPI()
 
 # Get Token safely
-TOKEN = os.environ.get("TOKEN")
+TOKEN = os.environ.get("BOT_TOKEN")
 
 def start(update, context):
     context.bot.send_message(chat_id=update.effective_chat.id, text="I'm a bot, please talk to me!")
