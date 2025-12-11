@@ -1,9 +1,11 @@
-# api/index.py file content
+# api/index.py content (using Flask)
 
 import os
+import json
 import logging
-from fastapi import FastAPI, Request, status
-from mangum import Mangum
+# --- FLASK Imports ---
+from flask import Flask, request, jsonify 
+# ---------------------
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -15,18 +17,9 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("BOT_TOKEN")
 
 if not TOKEN:
-    # Log an explicit error if the token is missing
     logger.error("FATAL ERROR: BOT_TOKEN is missing or None.")
-    # You might want to return an error response immediately here
-    # to avoid the crash, but let's see the logs first.
-else:
-    # Log the successful retrieval (masking the secret for security)
-    logger.info("BOT_TOKEN successfully retrieved. Length: %d", len(TOKEN))
-    logger.info("First 5 chars of token: %s*****", TOKEN[:5])
-
 
 # --- Build the Application (Global Scope) ---
-# If TOKEN is None, this line will likely cause the TypeError: issubclass() crash
 application = (
     Application.builder()
     .token(TOKEN)
@@ -36,7 +29,7 @@ application = (
 async def start(update: Update, context):
     """Handles the /start command."""
     await update.message.reply_text(
-        f"Hello, {update.effective_user.first_name}! I'm your Vercel-hosted Python bot."
+        f"Hello, {update.effective_user.first_name}! I'm your Vercel-hosted Flask bot."
     )
 
 async def echo(update: Update, context):
@@ -47,27 +40,36 @@ async def echo(update: Update, context):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-app = FastAPI()
 
-@app.get("/")
-def home():
-    """Simple endpoint to confirm the function is active."""
-    return {"status": "Vercel bot is running, awaiting webhook POSTs at /api"}
+# --- Define the Flask App to handle the Webhook ---
+# Vercel will automatically recognize the 'app' variable as the entry point
+app = Flask(__name__)
 
-@app.post("/api")
-async def telegram_webhook(request: Request):
+@app.route("/", methods=["GET", "POST"])
+def telegram_webhook():
     """Receives and processes the Telegram webhook POST request."""
-    try:
-        body = await request.json()
-        logger.info("Received update: %s", body)
-        update = Update.de_json(body, application.bot)
+    if request.method == "POST":
+        try:
+            # Flask's way to get the JSON body
+            body = request.get_json()
+            logger.info("Received update via Flask: %s", body)
 
-        await application.process_update(update)
+            # Create and process the Telegram Update object
+            update = Update.de_json(body, application.bot)
+            
+            # NOTE: We use application.process_update() directly here 
+            # (which runs the handlers asynchronously inside the worker)
+            application.process_update(update) 
 
-        return {"status": "ok"}, status.HTTP_200_OK
-    
-    except Exception as e:
-        logger.error("Error processing update: %s", e)
-        return {"status": "error", "message": str(e)}, status.HTTP_200_OK
+            # Telegram expects an immediate 200 response
+            return jsonify({"status": "ok"}), 200
+        
+        except Exception as e:
+            logger.error("Error processing update: %s", e)
+            # IMPORTANT: Still return 200 to prevent Telegram from retrying
+            return jsonify({"status": "error", "message": str(e)}), 200 
+            
+    # Default response for GET requests
+    return jsonify({"status": "Vercel bot is running, awaiting webhook POSTs at /api"}), 200
 
-handler = Mangum(app)
+# Vercel automatically finds the 'app' object, no 'handler = Mangum(app)' needed.
